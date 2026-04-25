@@ -32,6 +32,8 @@ LEVEL_MAP = {
 class WeatherAlertPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
+        if config is None:
+            config = {}
 
         # 配置
         self.api_key = config.get(CONFIG_KEY_API_KEY, "")
