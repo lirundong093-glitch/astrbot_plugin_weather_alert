@@ -1,0 +1,36 @@
+{
+  "api_key": {
+    "description": "和风天气 API Key",
+    "type": "string",
+    "obvious_hint": true,
+    "default": ""
+  },
+  "api_host": {
+    "description": "和风天气 API Host",
+    "type": "string",
+    "hint": "例如: devapi.qweather.com",
+    "default": "devapi.qweather.com"
+  },
+  "interval": {
+    "description": "获取数据间隔 (分钟)",
+    "type": "int",
+    "default": 30
+  },
+  "city": {
+    "description": "预报城市名称",
+    "type": "string",
+    "default": "北京"
+  },
+  "target_groups": {
+    "description": "预警推送群聊白名单",
+    "type": "list",
+    "hint": "填写需要接收预警推送的群组唯一标识符，如: napcat:GroupMessage:1350989414, telegram:FriendMessage:123456",
+    "default": []
+  },
+  "min_level": {
+    "description": "最低汇报预警级别 (1-4, 数字越小级别越高)",
+    "type": "int",
+    "hint": "1=红色, 2=橙色, 3=黄色, 4=蓝色",
+    "default": 4
+  }
+}
