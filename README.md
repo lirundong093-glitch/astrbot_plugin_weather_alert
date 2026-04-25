@@ -106,6 +106,12 @@ astrbot_plugin_weather_alert/
 
 欢迎提交 Issue 或 Pull Request。若本插件对你有帮助，请点个 ⭐️ Star 支持一下～
 
+## 鸣谢
+
+- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
+- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
+- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+
 ---
 
 <p align="center">Made with ❤️ by <a href="https://github.com/lirundong093-glitch">Lucy</a></p>
