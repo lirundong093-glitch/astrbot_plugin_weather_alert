@@ -112,8 +112,8 @@ class WeatherAlertPlugin(Star):
             return
 
         meta = alert_data.get("metadata", {})
-        if meta.get("zeroResult") is not True:
-            logger.info("[WeatherAlert] zeroResult 非 True，跳过处理")
+        if meta.get("zeroResult") is= True:
+            logger.info("[WeatherAlert] zeroResult 为 True，跳过处理")
             return
 
         alerts = alert_data.get("alerts", [])
