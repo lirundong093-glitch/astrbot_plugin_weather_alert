@@ -7,7 +7,7 @@
 </div>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v1.1.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-v1.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.8%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/AstrBot-%E6%8F%92%E4%BB%B6%E6%A1%86%E6%9E%B6-brightgreen" alt="AstrBot">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
