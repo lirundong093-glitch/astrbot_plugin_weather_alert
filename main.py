@@ -52,7 +52,8 @@ class WeatherAlertPlugin(Star):
         self.icons_dir = os.path.join(os.path.dirname(__file__), "icons")
 
         # 定时任务
-        self._task = None
+        self._task = asyncio.ensure_future(self._poll_loop())
+        logger.info("[WeatherAlert] 后台任务已从 __init__ 启动")
         self._stop_event = asyncio.Event()
 
         # 会话
@@ -143,14 +144,19 @@ class WeatherAlertPlugin(Star):
             # 生成图片
             img_path = self._generate_alert_image(alert)
 
+            # 自定义消息链封装（满足 send_message 需要 .chain 属性的要求）
+            class _MsgChain:
+                def __init__(self, items):
+                    self.chain = items
+
             # 推送到每个群聊
             for platform_group in self.target_groups:
                 try:
+                    components = [Plain(text)]
                     if img_path and os.path.exists(img_path):
-                        chain = [Plain(text), CompImage.fromFileSystem(img_path)]
-                    else:
-                        chain = [Plain(text)]
-                    await self.context.send_message(platform_group, chain)
+                        components.append(CompImage.fromFileSystem(img_path))
+                    msg = _MsgChain(components)
+                    await self.context.send_message(platform_group, msg)
                     logger.info(f"[WeatherAlert] 已推送预警 {alert_id} -> {platform_group}")
                 except Exception as e:
                     logger.error(f"[WeatherAlert] 推送失败 {platform_group}: {e}")
@@ -189,10 +195,8 @@ class WeatherAlertPlugin(Star):
     def _build_alert_text(self, alert: dict) -> str:
         desc = alert.get("description", "")
         inst = alert.get("instruction", "")
-        resps = alert.get("responseTypes", [])
-        resp_str = "、".join(resps) if resps else "无特定响应类型"
         event_name = alert.get("eventType", {}).get("name", "")
-        return f"⚠️ 预警类型: {event_name}\n📌 描述: {desc}\n🛡️ 指引: {inst}\n📋 响应类型: {resp_str}"
+        return f"⚠️ 预警类型: {event_name}\n📌 描述: {desc}\n🛡️ 指引: {inst}"
 
     # ---------- 字体获取 ----------
     def _get_system_font(self) -> str:
@@ -227,54 +231,83 @@ class WeatherAlertPlugin(Star):
 
     # ---------- 生成预警图片 ----------
     def _generate_alert_image(self, alert: dict) -> str:
-        """根据预警信息生成图片，返回临时文件路径"""
+        # ---------- 背景色 ----------
         try:
             color_info = alert.get("color", {})
-            r, g, b = color_info.get("red", 255), color_info.get("green", 255), color_info.get("blue", 255)
-            a = color_info.get("alpha", 1)
-            if isinstance(a, float) and a <= 1:
-                a = int(a * 255)
+            r = int(color_info.get("red", 255))
+            g = int(color_info.get("green", 255))
+            b = int(color_info.get("blue", 255))
+            a = int(float(color_info.get("alpha", 1)) * 255)
             bg_color = (r, g, b, a)
         except Exception:
             bg_color = (0, 0, 0, 255)
 
-        # 事件名称
+        # ---------- 事件名称与列拆分 ----------
         event_name = alert.get("eventType", {}).get("name", "未知预警")
-        # 拆分中文逗号/空格 -> 竖排多列
+        # 统一分隔符：中文逗号、英文逗号、空格
         parts = event_name.replace("，", ",").split(",")
-        # 进一步按空格拆分
-        text_parts = []
+        text_columns = []
         for p in parts:
-            text_parts.extend(p.strip().split())
+            text_columns.extend(p.strip().split())
+        # 过滤空列
+        text_columns = [col for col in text_columns if col]
 
-        # 图片尺寸
+        # ---------- 画布 ----------
         width = 600
         height = 400
         img = Image.new("RGBA", (width, height), bg_color)
         draw = ImageDraw.Draw(img)
 
-        # 左侧 2/3 绘制 SVG 图标
+        # 左侧 2/3 宽
+        left_width = int(width * 2 / 3)
+        # 右侧可用宽度（右侧 1/3 减去边距）
+        line_x = left_width + 5          # 竖线 x 坐标
+        right_margin = 10
+        right_usable = width - line_x - right_margin - 15  # 15 为文字区左边距
+
+        # ---------- 左侧 SVG 图标（转为纯白） ----------
         icon_code = alert.get("icon", "")
         svg_path = os.path.join(self.icons_dir, f"{icon_code}.svg")
-        left_width = int(width * 2 / 3)
         if icon_code and os.path.exists(svg_path):
             try:
-                png_bytes = cairosvg.svg2png(url=svg_path, output_width=left_width - 20, output_height=height - 20)
+                icon_size_w = left_width - 20
+                icon_size_h = height - 20
+                png_bytes = cairosvg.svg2png(
+                    url=svg_path, output_width=icon_size_w, output_height=icon_size_h
+                )
                 icon_pil = Image.open(BytesIO(png_bytes)).convert("RGBA")
-                img.paste(icon_pil, (10, 10), icon_pil)
+                # 将图标颜色替换为纯白色，保留 alpha 通道
+                alpha_channel = icon_pil.getchannel('A')
+                white_icon = Image.merge('RGBA', (
+                    Image.new('L', icon_pil.size, 255),
+                    Image.new('L', icon_pil.size, 255),
+                    Image.new('L', icon_pil.size, 255),
+                    alpha_channel
+                ))
+                img.paste(white_icon, (10, 10), white_icon)
             except Exception as e:
-                logger.warning(f"[WeatherAlert] SVG 渲染失败: {e}")
+                logger.warning(f"[WeatherAlert] SVG 图标处理失败: {e}")
 
-        # 绘制竖实线
-        line_x = left_width + 5
+        # ---------- 白色竖实线 ----------
         draw.line([(line_x, 20), (line_x, height - 20)], fill=(255, 255, 255, 255), width=3)
 
-        # 右侧 1/3 绘制竖排文字
-        right_area_x = line_x + 15
-        right_area_end = width - 10
-        font_path = self._get_system_font()
-        font_size = 32
+        # ---------- 右侧竖排文字 ----------
+        if not text_columns:
+            # 没有文字列，直接保存
+            tmp_dir = os.path.join(os.path.dirname(__file__), "tmp")
+            os.makedirs(tmp_dir, exist_ok=True)
+            tmp_path = os.path.join(tmp_dir, f"alert_{uuid.uuid4().hex}.png")
+            img.save(tmp_path)
+            return tmp_path
 
+        # 自适应字号：让文字列总宽度占满右侧可用区域
+        col_count = len(text_columns)
+        gap_between_cols = 10
+        max_font_size = (right_usable - (col_count - 1) * gap_between_cols) / col_count
+        font_size = max(12, int(max_font_size))  # 最小 12px 防过小
+
+        # 加载字体
+        font_path = self._get_system_font()
         if font_path:
             try:
                 font = ImageFont.truetype(font_path, font_size)
@@ -283,24 +316,36 @@ class WeatherAlertPlugin(Star):
         else:
             font = ImageFont.load_default()
 
-        # 计算竖排每列位置
-        current_x = right_area_x
-        y_start = 20
-        for part in text_parts:
-            if not part:
-                continue
-            y = y_start
-            for char in part:
-                # 避免超出
-                if current_x > right_area_end:
-                    break
-                draw.text((current_x, y), char, fill=(255, 255, 255, 255), font=font)
-                y += font_size + 4  # 竖排字间距
-            current_x += font_size + 10  # 列间距
-            if current_x > right_area_end:
-                break
+        # 右侧区域几何参数
+        top_margin = 20
+        bottom_margin = 20
+        right_area_center_y = top_margin + (height - top_margin - bottom_margin) / 2
+        right_start_x = line_x + 15
+        right_end_x = width - right_margin
+        right_width = right_end_x - right_start_x
 
-        # 保存临时文件
+        # 各列的 x 中心（等距分散，让整体占满右侧区域）
+        if col_count == 1:
+            col_centers = [(right_start_x + right_end_x) / 2]
+        else:
+            step = right_width / (col_count - 1) if col_count > 1 else 0
+            col_centers = [right_start_x + i * step for i in range(col_count)]
+
+        # 逐列绘制竖排文字（精确居中）
+        for idx, col_chars in enumerate(text_columns):
+            x_center = col_centers[idx]
+            col_text = "\n".join(col_chars)  # 每个字符一行，实现竖排
+            draw.multiline_text(
+                (x_center, right_area_center_y),
+                col_text,
+                fill=(255, 255, 255, 255),
+                font=font,
+                anchor='mm',      # 包围盒中心对齐坐标
+                align='center',
+                spacing=4         # 行间距，相当于原竖排的 y 增量
+            )
+
+        # ---------- 保存 ----------
         tmp_dir = os.path.join(os.path.dirname(__file__), "tmp")
         os.makedirs(tmp_dir, exist_ok=True)
         tmp_path = os.path.join(tmp_dir, f"alert_{uuid.uuid4().hex}.png")
