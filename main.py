@@ -160,7 +160,7 @@ class WeatherAlertPlugin(Star):
     # ---------- 获取城市坐标 ----------
     async def _get_city_coords(self, city: str):
         """调用 GeoAPI 获取城市经纬度"""
-        url = f"https://geoapi.qweather.com/v2/city/lookup"
+        url = f"https://{self.api_host}/geo/v2/city/lookup"
         params = {"location": city, "key": self.api_key}
         try:
             async with self._session.get(url, params=params, ssl=False) as resp:
