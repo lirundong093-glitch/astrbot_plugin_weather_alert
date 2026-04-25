@@ -3,7 +3,6 @@ import json
 import os
 import uuid
 import platform
-from datetime import datetime
 import aiohttp
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
@@ -48,7 +47,6 @@ class WeatherAlertPlugin(Star):
         self.latitude = None
         self.longitude = None
         self.seen_alert_ids = set()
-        self._current_clear_month = None  # 用于按月清空缓存
 
         # 图标路径: 插件目录/icons
         self.icons_dir = os.path.join(os.path.dirname(__file__), "icons")
@@ -77,24 +75,11 @@ class WeatherAlertPlugin(Star):
             self._session = None
         logger.info("[WeatherAlert] 插件已停用")
 
-    # ---------- 每月清空缓存 ----------
-    def _check_monthly_clear(self):
-        """检测月份是否变化，若变化则清空 seen_alert_ids"""
-        now = datetime.now()
-        current = (now.year, now.month)
-        if self._current_clear_month is None:
-            self._current_clear_month = current
-        elif self._current_clear_month != current:
-            logger.info("[WeatherAlert] 新月份开始，清空已推送预警ID缓存")
-            self.seen_alert_ids.clear()
-            self._current_clear_month = current
-
     # ---------- 定时轮询 ----------
     async def _poll_loop(self):
         await asyncio.sleep(5)  # 等待系统就绪
         while True:
             try:
-                self._check_monthly_clear()   # 月度清理检查
                 logger.info("[WeatherAlert] 开始轮询…")
                 await self._fetch_and_process()
             except Exception as e:
@@ -127,7 +112,7 @@ class WeatherAlertPlugin(Star):
             return
 
         meta = alert_data.get("metadata", {})
-        if meta.get("zeroResult") is True:
+        if meta.get("zeroResult") == "true":
             logger.info("[WeatherAlert] zeroResult 为 True，跳过处理")
             return
 
