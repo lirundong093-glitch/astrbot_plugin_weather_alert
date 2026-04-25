@@ -160,6 +160,14 @@ class WeatherAlertPlugin(Star):
                     logger.info(f"[WeatherAlert] 已推送预警 {alert_id} -> {platform_group}")
                 except Exception as e:
                     logger.error(f"[WeatherAlert] 推送失败 {platform_group}: {e}")
+                    
+            # 推送完成后删除临时图片
+            if img_path and os.path.exists(img_path):
+                try:
+                    os.remove(img_path)
+                    logger.info(f"[WeatherAlert] 已删除临时图片 {img_path}")
+                except Exception as e:
+                    logger.warning(f"[WeatherAlert] 删除临时图片失败 {img_path}: {e}")        
 
             self.seen_alert_ids.add(alert_id)
 
