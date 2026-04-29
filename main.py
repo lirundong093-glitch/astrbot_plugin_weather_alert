@@ -43,14 +43,17 @@ class WeatherAlertPlugin(Star):
         self.target_groups = config.get(CONFIG_KEY_TARGET_GROUPS, [])
         self.min_level = int(config.get(CONFIG_KEY_MIN_LEVEL, 4))
 
-        # 存储
-        self.latitude = None
-        self.longitude = None
-        self.seen_alert_ids = set()
-
         # 图标路径: 插件目录/icons
         self.icons_dir = os.path.join(os.path.dirname(__file__), "icons")
 
+        # 预警 ID 持久化文件路径
+        self.tmp_dir = os.path.join(os.path.dirname(__file__), "tmp")
+        os.makedirs(self.tmp_dir, exist_ok=True)
+        self.alert_ids_file = os.path.join(self.tmp_dir, "alert_ids.json")
+        
+        # 经纬度缓存文件
+        self.coords_file = os.path.join(self.tmp_dir, "coords.json")
+        
         # 定时任务
         self._task = asyncio.ensure_future(self._poll_loop())
         logger.info("[WeatherAlert] 后台任务已从 __init__ 启动")
@@ -75,6 +78,70 @@ class WeatherAlertPlugin(Star):
             await self._session.close()
             self._session = None
         logger.info("[WeatherAlert] 插件已停用")
+    
+    # ---------- 经纬度缓存（文件） ----------
+    def _load_coords_from_file(self):
+        """从文件读取坐标，若城市变化或无文件则返回 None"""
+        if not os.path.exists(self.coords_file):
+            return None, None
+        try:
+            with open(self.coords_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("city") != self.city:
+                logger.info("[WeatherAlert] 城市已变更，原缓存失效")
+                return None, None
+            lat = data.get("lat")
+            lon = data.get("lon")
+            if lat is None or lon is None:
+                return None, None
+            return float(lat), float(lon)
+        except Exception as e:
+            logger.warning(f"[WeatherAlert] 读取坐标缓存失败: {e}")
+            return None, None
+
+    def _save_coords_to_file(self, lat, lon):
+        """将坐标与当前城市名写入文件"""
+        data = {
+            "city": self.city,
+            "lat": lat,
+            "lon": lon
+        }
+        try:
+            with open(self.coords_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.info(f"[WeatherAlert] 坐标已缓存: {self.city} ({lat}, {lon})")
+        except Exception as e:
+            logger.error(f"[WeatherAlert] 保存坐标缓存失败: {e}")
+
+    # ---------- 存储预警ID ----------
+    def _is_alert_id_seen(self, alert_id: str) -> bool:
+        """检查文件是否已包含该 ID（纯文件读取）"""
+        if not os.path.exists(self.alert_ids_file):
+            return False
+        try:
+            with open(self.alert_ids_file, "r", encoding="utf-8") as f:
+                ids = json.load(f)
+                return alert_id in ids
+        except Exception as e:
+            logger.warning(f"[WeatherAlert] 读取预警ID文件失败: {e}")
+            return False
+    
+    def _mark_alert_id_as_seen(self, alert_id: str):
+        """将新 ID 追加写入文件（全量更新以保证顺序与去重）"""
+        ids = []
+        if os.path.exists(self.alert_ids_file):
+            try:
+                with open(self.alert_ids_file, "r", encoding="utf-8") as f:
+                    ids = json.load(f)
+            except Exception:
+                pass
+        if alert_id not in ids:
+            ids.append(alert_id)
+        try:
+            with open(self.alert_ids_file, "w", encoding="utf-8") as f:
+                json.dump(ids, f, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WeatherAlert] 保存预警ID文件失败: {e}")
 
     # ---------- 定时轮询 ----------
     async def _poll_loop(self):
@@ -98,13 +165,13 @@ class WeatherAlertPlugin(Star):
             self._session = aiohttp.ClientSession()
 
         # 1. 获取城市经纬度
-        lat, lon = await self._get_city_coords(self.city)
+        lat, lon = self._load_coords_from_file()
         if lat is None or lon is None:
-            logger.error(f"[WeatherAlert] 无法获取城市 '{self.city}' 的坐标")
-            return
-
-        self.latitude = lat
-        self.longitude = lon
+            lat, lon = await self._get_city_coords(self.city)
+            if lat is None or lon is None:
+                logger.error(f"[WeatherAlert] 无法获取城市 '{self.city}' 的坐标")
+                return
+            self._save_coords_to_file(lat, lon)
 
         # 2. 获取预警信息
         alert_data = await self._get_weather_alert(lat, lon)
@@ -127,7 +194,7 @@ class WeatherAlertPlugin(Star):
             alert_id = alert.get("id")
             if not alert_id:
                 continue
-            if alert_id in self.seen_alert_ids:
+            if self._is_alert_id_seen(alert_id):
                 logger.info(f"[WeatherAlert] 预警 ID {alert_id} 已推送，跳过")
                 continue
 
@@ -150,6 +217,7 @@ class WeatherAlertPlugin(Star):
                     self.chain = items
 
             # 推送到每个群聊
+            success_count = 0
             for platform_group in self.target_groups:
                 try:
                     components = [Plain(text)]
@@ -158,18 +226,22 @@ class WeatherAlertPlugin(Star):
                     msg = _MsgChain(components)
                     await self.context.send_message(platform_group, msg)
                     logger.info(f"[WeatherAlert] 已推送预警 {alert_id} -> {platform_group}")
+                    success_count += 1
                 except Exception as e:
                     logger.error(f"[WeatherAlert] 推送失败 {platform_group}: {e}")
-                    
-            # 推送完成后删除临时图片
+            
+            # 删除临时图片（保持不变）
             if img_path and os.path.exists(img_path):
                 try:
                     os.remove(img_path)
                     logger.info(f"[WeatherAlert] 已删除临时图片 {img_path}")
                 except Exception as e:
-                    logger.warning(f"[WeatherAlert] 删除临时图片失败 {img_path}: {e}")        
-
-            self.seen_alert_ids.add(alert_id)
+                    logger.warning(f"[WeatherAlert] 删除临时图片失败 {img_path}: {e}")
+            
+            # 仅当至少有一个群推送成功时才标记为已处理
+            if success_count > 0:
+                self._mark_alert_id_as_seen(alert_id)
+                logger.info(f"[WeatherAlert] 预警 {alert_id} 成功推送，ID 已写入文件")
 
     # ---------- 获取城市坐标 ----------
     async def _get_city_coords(self, city: str):
@@ -252,12 +324,10 @@ class WeatherAlertPlugin(Star):
 
         # ---------- 事件名称与列拆分 ----------
         event_name = alert.get("eventType", {}).get("name", "未知预警")
-        # 统一分隔符：中文逗号、英文逗号、空格
         parts = event_name.replace("，", ",").split(",")
         text_columns = []
         for p in parts:
             text_columns.extend(p.strip().split())
-        # 过滤空列
         text_columns = [col for col in text_columns if col]
 
         # ---------- 画布 ----------
@@ -268,7 +338,6 @@ class WeatherAlertPlugin(Star):
 
         # 左侧 2/3 宽
         left_width = int(width * 2 / 3)
-        # 右侧可用宽度（右侧 1/3 减去边距）
         line_x = left_width + 5          # 竖线 x 坐标
         right_margin = 10
         right_usable = width - line_x - right_margin - 15  # 15 为文字区左边距
@@ -284,7 +353,6 @@ class WeatherAlertPlugin(Star):
                     url=svg_path, output_width=icon_size_w, output_height=icon_size_h
                 )
                 icon_pil = Image.open(BytesIO(png_bytes)).convert("RGBA")
-                # 将图标颜色替换为纯白色，保留 alpha 通道
                 alpha_channel = icon_pil.getchannel('A')
                 white_icon = Image.merge('RGBA', (
                     Image.new('L', icon_pil.size, 255),
@@ -299,22 +367,35 @@ class WeatherAlertPlugin(Star):
         # ---------- 白色竖实线 ----------
         draw.line([(line_x, 20), (line_x, height - 20)], fill=(255, 255, 255, 255), width=3)
 
-        # ---------- 右侧竖排文字 ----------
+        # 右侧竖排文字 ———— 使用 anchor 参数使文字 Y 轴中心对齐画布中心
+        spacing = 4
+        right_start_x = line_x + 15
+        right_end_x = width - 10
+        right_width = right_end_x - right_start_x
+
         if not text_columns:
-            # 没有文字列，直接保存
             tmp_dir = os.path.join(os.path.dirname(__file__), "tmp")
             os.makedirs(tmp_dir, exist_ok=True)
             tmp_path = os.path.join(tmp_dir, f"alert_{uuid.uuid4().hex}.png")
             img.save(tmp_path)
             return tmp_path
 
-        # 自适应字号：让文字列总宽度占满右侧可用区域
+        # 计算字体大小（仍然基于安全可用高度，避免超出上下边缘）
+        top_margin = 20
+        bottom_margin = 20
+        available_height = height - top_margin - bottom_margin
+        max_chars = max((len(col) for col in text_columns), default=0)
+        font_size_by_height = max(12, int((available_height - spacing * (max_chars - 1)) / max_chars))
+
         col_count = len(text_columns)
         gap_between_cols = 10
-        max_font_size = (right_usable - (col_count - 1) * gap_between_cols) / col_count
-        font_size = max(12, int(max_font_size))  # 最小 12px 防过小
+        if col_count == 1:
+            max_width_per_col = right_width
+        else:
+            max_width_per_col = (right_width - gap_between_cols * (col_count - 1)) / col_count
+        font_size_by_width = int(max_width_per_col)
+        font_size = max(12, min(font_size_by_height, font_size_by_width))
 
-        # 加载字体
         font_path = self._get_system_font()
         if font_path:
             try:
@@ -324,33 +405,28 @@ class WeatherAlertPlugin(Star):
         else:
             font = ImageFont.load_default()
 
-        # 右侧区域几何参数
-        top_margin = 20
-        bottom_margin = 20
-        right_area_center_y = top_margin + (height - top_margin - bottom_margin) / 2
-        right_start_x = line_x + 15
-        right_end_x = width - right_margin
-        right_width = right_end_x - right_start_x
-
-        # 各列的 x 中心（等距分散，让整体占满右侧区域）
+        # 各列的 x 中心（等距分散，占满右侧横向空间）
         if col_count == 1:
             col_centers = [(right_start_x + right_end_x) / 2]
         else:
-            step = right_width / (col_count - 1) if col_count > 1 else 0
+            step = right_width / (col_count - 1)
             col_centers = [right_start_x + i * step for i in range(col_count)]
 
-        # 逐列绘制竖排文字（精确居中）
+        # 整个画布的 Y 轴中心
+        center_y = height / 2
+
+        # 逐列绘制竖排文字，使用 anchor="mm" 自动居中
         for idx, col_chars in enumerate(text_columns):
             x_center = col_centers[idx]
-            col_text = "\n".join(col_chars)  # 每个字符一行，实现竖排
+            col_text = "\n".join(col_chars)
             draw.multiline_text(
-                (x_center, right_area_center_y),
+                (x_center, center_y),      # 锚点位置（列中心 X，画布中心 Y）
                 col_text,
                 fill=(255, 255, 255, 255),
                 font=font,
-                anchor='mm',      # 包围盒中心对齐坐标
-                align='center',
-                spacing=4         # 行间距，相当于原竖排的 y 增量
+                spacing=spacing,
+                align="center",
+                anchor="mm"                # 水平+垂直居中对齐
             )
 
         # ---------- 保存 ----------
