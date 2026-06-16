@@ -48,7 +48,6 @@ class WeatherAlertPlugin(Star):
         # 资源路径
         resources_dir = os.path.join(os.path.dirname(__file__), "resources")
         self.icons_dir = os.path.join(resources_dir, "icons")
-        self.font_path = os.path.join(resources_dir, "fonts", "qweather-icons.ttf")
 
         # 持久化目录 → data/plugin_data/
         self.data_dir = os.path.join("data", "plugin_data", "astrbot_plugin_weather_alert")
@@ -246,7 +245,11 @@ class WeatherAlertPlugin(Star):
 
     # ---------- 字体 ----------
     def _get_font(self) -> str:
-        return self.font_path if os.path.exists(self.font_path) else ""
+        fonts_dir = os.path.join(os.path.dirname(__file__), "resources", "fonts")
+        for f in sorted(os.listdir(fonts_dir)):
+            if f.lower().endswith((".ttf", ".ttc", ".otf")):
+                return os.path.join(fonts_dir, f)
+        return ""
 
     # ---------- 图片生成 ----------
     def _generate_alert_image(self, alert: dict) -> str:
@@ -306,11 +309,17 @@ class WeatherAlertPlugin(Star):
 
         step = right_width_col / (col_count - 1) if col_count > 1 else 0
         col_centers = [right_start_x + i * step for i in range(col_count)] if col_count > 1 else [(right_start_x + right_end_x)/2]
-        center_y = height / 2
 
+        # 逐字手动画，避开 multiline_text anchor="mm" + spacing 的偏移
         for idx, chars in enumerate(text_columns):
-            draw.multiline_text((col_centers[idx], center_y), "\n".join(chars),
-                                fill=(255,255,255,255), font=font, spacing=spacing, align="center", anchor="mm")
+            char_count = len(chars)
+            char_height = font_size
+            block_h = char_count * char_height + spacing * (char_count - 1)
+            start_y = (height - block_h) / 2
+            for ci, ch in enumerate(chars):
+                ch_y = start_y + ci * (char_height + spacing) + char_height / 2
+                draw.text((col_centers[idx], ch_y), ch,
+                          fill=(255, 255, 255, 255), font=font, anchor="mm")
 
         tmp_path = os.path.join(self.data_dir, f"alert_{uuid.uuid4().hex}.png")
         img.save(tmp_path)
