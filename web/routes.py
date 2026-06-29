@@ -1,4 +1,7 @@
-"""分群城市映射的 Web API 路由"""
+"""分群城市映射的 Web API 路由
+
+映射数据存储在 data/plugin_data/astrbot_plugin_weather_alert/group_city_mapping.json
+"""
 
 import json
 import logging
@@ -12,40 +15,42 @@ logger = logging.getLogger("astrbot")
 PLUGIN_NAME = "astrbot_plugin_weather_alert"
 
 _plugin: Any = None
+_data_dir: str = ""
 
 
-def _get_mapping() -> dict:
-    return _plugin.config.get("group_city_mapping", {}) or {}
+def _mapping_path() -> str:
+    return os.path.join(_data_dir, "group_city_mapping.json")
 
 
-def _save_mapping(mapping: dict):
-    _plugin.config["group_city_mapping"] = mapping
-    # Write through to config file
-    config_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "..", "..", "config", f"{PLUGIN_NAME}_config.json"
-    )
-    try:
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            cfg["group_city_mapping"] = mapping
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.warning(f"[GroupCityAPI] config write failed: {e}")
+def _read_mapping() -> dict:
+    path = _mapping_path()
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _write_mapping(mapping: dict):
+    path = _mapping_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, ensure_ascii=False, indent=2)
 
 
 def register_routes(context: Any, plugin: Any):
-    global _plugin
+    global _plugin, _data_dir
     _plugin = plugin
+    _data_dir = str(plugin.data_dir)
 
     async def _list():
-        mapping = _get_mapping()
+        mapping = _read_mapping()
         items = [{"origin": k, "city": v} for k, v in sorted(mapping.items())]
         return jsonify({
             "items": items,
-            "default_city": _plugin.config.get("city", ""),
+            "default_city": _plugin.city or "",
         })
 
     async def _add():
@@ -58,9 +63,9 @@ def register_routes(context: Any, plugin: Any):
         if not city:
             return jsonify({"message": "城市名不能为空", "ok": False})
 
-        mapping = dict(_get_mapping())
+        mapping = _read_mapping()
         mapping[origin] = city
-        _save_mapping(mapping)
+        _write_mapping(mapping)
 
         logger.warning(f"[GroupCityAPI] set {origin} -> {city}")
         return jsonify({"message": "已保存 " + origin + " -> " + city})
@@ -72,12 +77,12 @@ def register_routes(context: Any, plugin: Any):
         if not origin:
             return jsonify({"message": "群标识符不能为空", "ok": False})
 
-        mapping = dict(_get_mapping())
+        mapping = _read_mapping()
         if origin not in mapping:
             return jsonify({"message": "未找到 " + origin + " 的映射", "ok": False})
 
         del mapping[origin]
-        _save_mapping(mapping)
+        _write_mapping(mapping)
 
         logger.warning(f"[GroupCityAPI] deleted {origin}")
         return jsonify({"message": "已删除 " + origin})

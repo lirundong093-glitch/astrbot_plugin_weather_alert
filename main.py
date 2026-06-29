@@ -45,8 +45,6 @@ class WeatherAlertPlugin(Star):
         self.target_groups = config.get(CONFIG_KEY_TARGET_GROUPS, [])
         self.min_level = int(config.get(CONFIG_KEY_MIN_LEVEL, 4))
         self.skip_dismissed = bool(config.get(CONFIG_KEY_SKIP_DISMISSED, True))
-        self.group_city_mapping = config.get("group_city_mapping", {}) or {}
-        self.config = config  # 保留原始 config 供 web/routes 使用
 
         # 资源路径
         resources_dir = os.path.join(os.path.dirname(__file__), "resources")
@@ -66,6 +64,18 @@ class WeatherAlertPlugin(Star):
         # 注册 Web API 路由
         register_routes(self.context, self)
         logger.info("[WeatherAlert] Web API 路由已注册")
+
+    def _read_group_city_mapping(self) -> dict:
+        """从 plugin_data 目录读取分群城市映射"""
+        import json as _json
+        path = os.path.join(self.data_dir, "group_city_mapping.json")
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return _json.load(f)
+            except Exception:
+                pass
+        return {}
 
     async def start(self):
         if self._task is None:
@@ -159,7 +169,7 @@ class WeatherAlertPlugin(Star):
             self._session = aiohttp.ClientSession()
 
         default_city = self.city or "北京"
-        mappings = self.group_city_mapping or {}
+        mappings = self._read_group_city_mapping()
 
         # 按城市分组：city → [origin1, origin2, ...]
         city_groups: dict[str, list[str]] = {}
