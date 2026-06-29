@@ -46,6 +46,7 @@ class WeatherAlertPlugin(Star):
         self.min_level = int(config.get(CONFIG_KEY_MIN_LEVEL, 4))
         self.skip_dismissed = bool(config.get(CONFIG_KEY_SKIP_DISMISSED, True))
         self.group_city_mapping = config.get("group_city_mapping", {}) or {}
+        self.config = config  # 保留原始 config 供 web/routes 使用
 
         # 资源路径
         resources_dir = os.path.join(os.path.dirname(__file__), "resources")
