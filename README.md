@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/version-v1.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.8%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/AstrBot-%E6%8F%92%E4%BB%B6%E6%A1%86%E6%9E%B6-brightgreen" alt="AstrBot">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+  <img src="https://img.shields.io/badge/license-AGPL_v3-blue" alt="License">
 </p>
 
 ## ✨ 功能
@@ -104,7 +104,7 @@ astrbot_plugin_weather_alert/
 
 ## 📝 许可证
 
-[MIT License](LICENSE)
+[GNU AGPL v3.0](LICENSE)
 
 ## 🙏 鸣谢
 
