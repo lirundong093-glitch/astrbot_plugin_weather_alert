@@ -1,0 +1,236 @@
+1|<!DOCTYPE html>
+2|<html lang="zh-CN">
+3|<head>
+4|<meta charset="utf-8"/>
+5|<title>分群城市映射</title>
+6|<style>
+7|  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+8|  body {
+9|    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+10|    background: #f5f6fa;
+11|    color: #2c3e50;
+12|    padding: 24px;
+13|  }
+14|  .container { max-width: 900px; margin: 0 auto; }
+15|  h1 { font-size: 22px; margin-bottom: 4px; }
+16|  .subtitle { color: #7f8c8d; font-size: 13px; margin-bottom: 24px; }
+17|
+18|  .form-row {
+19|    display: flex; gap: 12px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap;
+20|  }
+21|  .field { display: flex; flex-direction: column; gap: 4px; min-width: 200px; flex: 1; }
+22|  .field label { font-size: 12px; font-weight: 600; color: #576574; text-transform: uppercase; letter-spacing: 0.5px; }
+23|  .field input {
+24|    padding: 8px 12px; border: 1px solid #dcdde1; border-radius: 6px;
+25|    font-size: 14px; outline: none; transition: border-color .2s;
+26|  }
+27|  .field input:focus { border-color: #3498db; }
+28|  .field input::placeholder { color: #b2bec3; }
+29|
+30|  button {
+31|    padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px;
+32|    cursor: pointer; font-weight: 500; transition: background .2s, opacity .2s;
+33|  }
+34|  button:disabled { opacity: 0.5; cursor: default; }
+35|  .btn-primary { background: #3498db; color: #fff; }
+36|  .btn-primary:hover:not(:disabled) { background: #2980b9; }
+37|  .btn-ghost { background: transparent; color: #e74c3c; padding: 4px 8px; font-size: 13px; }
+38|  .btn-ghost:hover { background: #fde8e8; }
+39|  .btn-blue-sm { background: #3498db; color: #fff; padding: 4px 12px; font-size: 13px; }
+40|  .btn-cancel { background: #b2bec3; color: #fff; }
+41|  .btn-cancel:hover { background: #95a5a6; }
+42|
+43|  .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden; }
+44|  table { width: 100%; border-collapse: collapse; }
+45|  th, td { text-align: left; padding: 12px 16px; font-size: 14px; }
+46|  th {
+47|    background: #f8f9fa; font-weight: 600; color: #636e72;
+48|    font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #e9ecef;
+49|  }
+50|  td { border-bottom: 1px solid #f1f2f6; }
+51|  tr:last-child td { border-bottom: none; }
+52|  tr:hover td { background: #f8f9ff; }
+53|
+54|  .city-badge {
+55|    display: inline-block; background: #e8f4fd; color: #2980b9;
+56|    padding: 2px 10px; border-radius: 12px; font-size: 13px; font-weight: 500;
+57|  }
+58|  .empty { padding: 40px; text-align: center; color: #b2bec3; font-size: 14px; }
+59|
+60|  .toast {
+61|    position: fixed; top: 20px; right: 20px; padding: 10px 20px;
+62|    border-radius: 8px; font-size: 13px; z-index: 999; animation: fadeOut 0.3s 2.2s forwards;
+63|  }
+64|  .toast.success { background: #27ae60; color: #fff; }
+65|  .toast.error { background: #c0392b; color: #fff; }
+66|  @keyframes fadeOut { to { opacity: 0; } }
+67|
+68|  .note { font-size: 12px; color: #95a5a6; margin-top: 16px; }
+69|  .note code { background: #ecf0f1; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+70|
+71|  @media (max-width: 600px) {
+72|    body { padding: 12px; }
+73|    .form-row { flex-direction: column; }
+74|    .field { min-width: 100%; }
+75|  }
+76|</style>
+77|</head>
+78|<body>
+79|<div class="container">
+80|  <h1>🏙️ 分群城市映射</h1>
+81|  <p class="subtitle">为不同群聊配置独立的天气预报推送城市，未配置的群将使用默认城市</p>
+82|
+83|  <div class="form-row">
+84|    <div class="field">
+85|      <label>群聊标识符 (origin)</label>
+86|      <input id="inputOrigin" placeholder="napcat:GroupMessage:群号" />
+87|    </div>
+88|    <div class="field">
+89|      <label>推送城市</label>
+90|      <input id="inputCity" placeholder="例如 上海" />
+91|    </div>
+92|    <button id="btnSave" class="btn-primary" style="align-self:flex-end">保存映射</button>
+93|    <button id="btnCancel" class="btn-cancel" style="align-self:flex-end;display:none">取消编辑</button>
+94|  </div>
+95|
+96|  <div class="card">
+97|    <table>
+98|      <thead>
+99|        <tr><th style="width:45%">群聊标识符</th><th style="width:30%">推送城市</th><th style="width:25%">操作</th></tr>
+100|      </thead>
+101|      <tbody id="tbody"></tbody>
+102|    </table>
+103|  </div>
+104|
+105|  <p class="note">
+106|    💡 格式：<code>平台名:消息类型:群号</code>，如 <code>napcat:GroupMessage:1350989414</code>
+107|    · 默认城市：<strong id="defaultCity">-</strong>
+108|  </p>
+109|</div>
+110|
+111|<script>
+112|  let bridge = window.AstrBotPluginPage;
+113|  let mappings = [];
+114|  let editingOrigin = null;
+115|
+116|  async function waitBridge(retries) {
+117|    if (bridge) return;
+118|    for (var i = 0; i < retries; i++) {
+119|      bridge = window.AstrBotPluginPage;
+120|      if (bridge) return;
+121|      await new Promise(function (r) { setTimeout(r, 500); });
+122|    }
+123|    throw new Error('Bridge SDK not injected');
+124|  }
+125|
+126|  function toast(msg, cls) {
+127|    var t = document.createElement('div');
+128|    t.className = 'toast ' + (cls || 'success');
+129|    t.textContent = msg;
+130|    document.body.appendChild(t);
+131|    setTimeout(function () { t.remove(); }, 2500);
+132|  }
+133|
+134|  function esc(s) {
+135|    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+136|  }
+137|
+138|  function render() {
+139|    var tbody = document.getElementById('tbody');
+140|    if (!mappings.length) {
+141|      tbody.innerHTML = '<tr><td colspan="3" class="empty">暂无映射配置，请在上方添加</td></tr>';
+142|      return;
+143|    }
+144|    tbody.innerHTML = mappings.map(function (m, i) {
+145|      return '<tr><td><code>' + esc(m.origin) + '</code></td>'
+146|        + '<td><span class="city-badge">' + esc(m.city) + '</span></td>'
+147|        + '<td><button class="btn-blue-sm" onclick="editItem(' + i + ')">编辑</button> '
+148|        + '<button class="btn-ghost" onclick="deleteItem(' + i + ')">删除</button></td></tr>';
+149|    }).join('');
+150|  }
+151|
+152|  async function loadMappings() {
+153|    try {
+154|      var data = await bridge.apiGet('group_cities');
+155|      mappings = data.items || [];
+156|      document.getElementById('defaultCity').textContent = data.default_city || '未设置';
+157|      render();
+158|    } catch (e) {
+159|      toast('加载失败: ' + e.message, 'error');
+160|    }
+161|  }
+162|
+163|  async function saveMapping(origin, city) {
+164|    try {
+165|      var result = await bridge.apiPost('group_cities', { origin: origin, city: city });
+166|      toast(result.message || (editingOrigin ? '已更新' : '已添加'));
+167|      resetForm();
+168|      await loadMappings();
+169|    } catch (e) {
+170|      toast('保存失败: ' + e.message, 'error');
+171|    }
+172|  }
+173|
+174|  async function doDelete(origin) {
+175|    if (!confirm('确认删除 ' + origin + ' 的映射吗？')) return;
+176|    try {
+177|      var result = await bridge.apiPost('group_cities/delete', { origin: origin });
+178|      toast(result.message || '已删除');
+179|      await loadMappings();
+180|    } catch (e) {
+181|      toast('删除失败: ' + e.message, 'error');
+182|    }
+183|  }
+184|
+185|  function resetForm() {
+186|    document.getElementById('inputOrigin').value = '';
+187|    document.getElementById('inputCity').value = '';
+188|    editingOrigin = null;
+189|    document.getElementById('btnCancel').style.display = 'none';
+190|    document.getElementById('btnSave').textContent = '保存映射';
+191|    document.getElementById('inputOrigin').disabled = false;
+192|  }
+193|
+194|  function editItem(idx) {
+195|    var m = mappings[idx];
+196|    document.getElementById('inputOrigin').value = m.origin;
+197|    document.getElementById('inputCity').value = m.city;
+198|    editingOrigin = m.origin;
+199|    document.getElementById('btnCancel').style.display = '';
+200|    document.getElementById('btnSave').textContent = '更新映射';
+201|    document.getElementById('inputOrigin').disabled = true;
+202|    document.getElementById('inputCity').focus();
+203|  }
+204|
+205|  function deleteItem(idx) { doDelete(mappings[idx].origin); }
+206|
+207|  document.getElementById('btnSave').addEventListener('click', async function () {
+208|    var origin = document.getElementById('inputOrigin').value.trim();
+209|    var city = document.getElementById('inputCity').value.trim();
+210|    if (!origin) { toast('请输入群聊标识符', 'error'); return; }
+211|    if (!city) { toast('请输入城市名', 'error'); return; }
+212|    await saveMapping(origin, city);
+213|  });
+214|
+215|  document.getElementById('btnCancel').addEventListener('click', resetForm);
+216|
+217|  document.getElementById('inputCity').addEventListener('keydown', function (e) {
+218|    if (e.key === 'Enter') document.getElementById('btnSave').click();
+219|  });
+220|  document.getElementById('inputOrigin').addEventListener('keydown', function (e) {
+221|    if (e.key === 'Enter') document.getElementById('inputCity').focus();
+222|  });
+223|
+224|  (async function () {
+225|    try {
+226|      await waitBridge(30);
+227|      await bridge.ready();
+228|      await loadMappings();
+229|    } catch (e) {
+230|      document.querySelector('.container').innerHTML = '<div style="padding:40px;color:#c0392b;text-align:center">Bridge SDK 加载失败，请刷新页面</div>';
+231|    }
+232|  })();
+233|</script>
+234|</body>
+235|</html>
+236|

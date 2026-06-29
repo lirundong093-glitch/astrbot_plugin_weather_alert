@@ -11,6 +11,7 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageChain
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
 from astrbot.api.message_components import Plain, Image as CompImage
+from .web.routes import register_routes
 
 # ---------- 配置键映射 ----------
 CONFIG_KEY_API_KEY = "api_key"
@@ -44,6 +45,7 @@ class WeatherAlertPlugin(Star):
         self.target_groups = config.get(CONFIG_KEY_TARGET_GROUPS, [])
         self.min_level = int(config.get(CONFIG_KEY_MIN_LEVEL, 4))
         self.skip_dismissed = bool(config.get(CONFIG_KEY_SKIP_DISMISSED, True))
+        self.group_city_mapping = config.get("group_city_mapping", {}) or {}
 
         # 资源路径
         resources_dir = os.path.join(os.path.dirname(__file__), "resources")
@@ -59,6 +61,10 @@ class WeatherAlertPlugin(Star):
         self._task = asyncio.ensure_future(self._poll_loop())
         logger.info("[WeatherAlert] 后台任务已从 __init__ 启动")
         self._session = None
+
+        # 注册 Web API 路由
+        register_routes(self.context, self)
+        logger.info("[WeatherAlert] Web API 路由已注册")
 
     async def start(self):
         if self._task is None:
@@ -140,63 +146,77 @@ class WeatherAlertPlugin(Star):
 
     # ---------- 核心逻辑 ----------
     async def _fetch_and_process(self):
-        if not self.api_key or not self.api_host or not self.city:
-            logger.warning("[WeatherAlert] 缺少必要配置 (api_key/host/city)")
+        if not self.api_key or not self.api_host:
+            logger.warning("[WeatherAlert] 缺少必要配置 (api_key/host)")
+            return
+
+        if not self.target_groups:
+            logger.info("[WeatherAlert] target_groups 为空，跳过")
             return
 
         if not self._session:
             self._session = aiohttp.ClientSession()
 
-        # 1. 获取坐标
-        lat, lon = self._load_coords_from_file()
-        if lat is None or lon is None:
-            lat, lon = await self._get_city_coords(self.city)
-            if lat is None or lon is None:
-                logger.error(f"[WeatherAlert] 无法获取城市 '{self.city}' 的坐标")
-                return
-            self._save_coords_to_file(lat, lon)
+        default_city = self.city or "北京"
+        mappings = self.group_city_mapping or {}
 
-        # 2. 获取预警
-        alert_data = await self._get_weather_alert(lat, lon)
-        if not alert_data:
-            return
+        # 按城市分组：city → [origin1, origin2, ...]
+        city_groups: dict[str, list[str]] = {}
+        for origin in self.target_groups:
+            city = mappings.get(origin) or default_city
+            city_groups.setdefault(city, []).append(origin)
 
-        meta = alert_data.get("metadata", {})
-        if meta.get("zeroResult") == "true":
-            logger.info("[WeatherAlert] zeroResult 为 True，跳过")
-            return
+        logger.info(f"[WeatherAlert] 分群城市: { {c: len(gs) for c, gs in city_groups.items()} }")
 
-        alerts = alert_data.get("alerts", [])
-        if not alerts:
-            return
+        # 对每个城市独立获取预警
+        for city, origins in city_groups.items():
+            try:
+                lat, lon = await self._get_city_coords(city)
+                if lat is None or lon is None:
+                    logger.warning(f"[WeatherAlert] 无法获取 '{city}' 坐标，跳过该城市")
+                    continue
 
-        # 3. 处理每条预警
-        for alert in alerts:
-            alert_id = alert.get("id")
-            if not alert_id or self._is_alert_id_seen(alert_id):
-                continue
+                alert_data = await self._get_weather_alert(lat, lon)
+                if not alert_data:
+                    continue
 
-            # 检测"预警信号解除"，跳过推送但持久化记录
-            desc = alert.get("description", "")
-            if self.skip_dismissed and ("预警信号解除" in desc or "预警解除" in desc):
-                self._mark_alert_id_as_seen(alert_id)
-                logger.info(f"[WeatherAlert] 跳过预警解除 (id={alert_id}): {desc[:50]}...")
-                continue
+                meta = alert_data.get("metadata", {})
+                if meta.get("zeroResult") == "true":
+                    logger.info(f"[WeatherAlert] {city} zeroResult=True")
+                    continue
 
-            color_code = alert.get("color", {}).get("code", "").lower()
-            if LEVEL_MAP.get(color_code, 99) > self.min_level:
-                continue
+                alerts = alert_data.get("alerts", [])
+                if not alerts:
+                    continue
 
-            text = self._build_alert_text(alert)
-            img_path = self._generate_alert_image(alert)
-            success = await self._push_alert(text, img_path)
-            if success:
-                self._mark_alert_id_as_seen(alert_id)
+                for alert in alerts:
+                    alert_id = alert.get("id")
+                    if not alert_id or self._is_alert_id_seen(alert_id):
+                        continue
 
-    async def _push_alert(self, text: str, img_path: str) -> bool:
-        """推送预警到所有目标群，失败返回 False"""
+                    desc = alert.get("description", "")
+                    if self.skip_dismissed and ("预警信号解除" in desc or "预警解除" in desc):
+                        self._mark_alert_id_as_seen(alert_id)
+                        logger.info(f"[WeatherAlert] {city} 跳过预警解除 (id={alert_id})")
+                        continue
+
+                    color_code = alert.get("color", {}).get("code", "").lower()
+                    if LEVEL_MAP.get(color_code, 99) > self.min_level:
+                        continue
+
+                    text = self._build_alert_text(alert)
+                    img_path = self._generate_alert_image(alert)
+                    success = await self._push_alert(text, img_path, origins)
+                    if success:
+                        self._mark_alert_id_as_seen(alert_id)
+
+            except Exception as e:
+                logger.error(f"[WeatherAlert] {city} 处理异常: {e}", exc_info=True)
+
+    async def _push_alert(self, text: str, img_path: str, targets: list[str]) -> bool:
+        """推送预警到指定群列表，失败返回 False"""
         success_count = 0
-        for group in self.target_groups:
+        for group in targets:
             try:
                 chain = MessageChain().message(text)
                 if img_path and os.path.exists(img_path):
@@ -206,12 +226,12 @@ class WeatherAlertPlugin(Star):
                 logger.info(f"[WeatherAlert] 已推送 -> {group}")
             except Exception as e:
                 logger.error(f"[WeatherAlert] 推送失败 {group}: {e}")
-            finally:
-                if img_path and os.path.exists(img_path):
-                    try:
-                        os.remove(img_path)
-                    except OSError:
-                        pass
+        # 清理临时图片
+        if img_path and os.path.exists(img_path):
+            try:
+                os.remove(img_path)
+            except OSError:
+                pass
         return success_count > 0
 
     # ---------- API 调用 ----------
