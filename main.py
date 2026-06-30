@@ -8,10 +8,12 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import cairosvg
 from astrbot.api.event import filter, AstrMessageEvent, MessageChain
-from astrbot.api.star import Context, Star, StarTools
+from astrbot.api.star import Context, Star
 from astrbot.api import logger
 from astrbot.api.message_components import Plain, Image as CompImage
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from .web.routes import register_routes
+from pathlib import Path
 
 # ---------- 配置键映射 ----------
 CONFIG_KEY_API_KEY = "api_key"
@@ -51,7 +53,7 @@ class WeatherAlertPlugin(Star):
         self.icons_dir = os.path.join(resources_dir, "icons")
 
         # 持久化目录
-        self.data_dir = StarTools.get_data_dir("astrbot_plugin_weather_alert")
+        self.data_dir = str(Path(get_astrbot_data_path()) / "plugin_data" / "astrbot_plugin_weather_alert")
         os.makedirs(self.data_dir, exist_ok=True)
         self.alert_ids_file = os.path.join(self.data_dir, "alert_ids.json")
         self.coords_file = os.path.join(self.data_dir, "coords.json")
