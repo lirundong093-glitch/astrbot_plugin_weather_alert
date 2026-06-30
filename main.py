@@ -151,7 +151,7 @@ class WeatherAlertPlugin(Star):
         await asyncio.sleep(5)
         while True:
             try:
-                logger.info("[WeatherAlert] 开始轮询…")
+                logger.warning("[WeatherAlert] 开始轮询…")
                 await self._fetch_and_process()
             except Exception as e:
                 logger.error(f"[WeatherAlert] 轮询异常: {e}")
@@ -164,7 +164,7 @@ class WeatherAlertPlugin(Star):
             return
 
         if not self.target_groups:
-            logger.info("[WeatherAlert] target_groups 为空，跳过")
+            logger.warning("[WeatherAlert] target_groups 为空，跳过")
             return
 
         if not self._session:
@@ -179,7 +179,7 @@ class WeatherAlertPlugin(Star):
             city = mappings.get(origin) or default_city
             city_groups.setdefault(city, []).append(origin)
 
-        logger.info(f"[WeatherAlert] 分群城市: { {c: len(gs) for c, gs in city_groups.items()} }")
+        logger.warning(f"[WeatherAlert] 分群城市: { {c: len(gs) for c, gs in city_groups.items()} }")
 
         # 对每个城市独立获取预警
         for city, origins in city_groups.items():
