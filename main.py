@@ -8,7 +8,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import cairosvg
 from astrbot.api.event import filter, AstrMessageEvent, MessageChain
-from astrbot.api.star import Context, Star
+from astrbot.api.star import Context, Star, StarTools
 from astrbot.api import logger
 from astrbot.api.message_components import Plain, Image as CompImage
 from .web.routes import register_routes
@@ -50,8 +50,8 @@ class WeatherAlertPlugin(Star):
         resources_dir = os.path.join(os.path.dirname(__file__), "resources")
         self.icons_dir = os.path.join(resources_dir, "icons")
 
-        # 持久化目录 → data/plugin_data/
-        self.data_dir = os.path.join("data", "plugin_data", "astrbot_plugin_weather_alert")
+        # 持久化目录
+        self.data_dir = StarTools.get_data_dir("astrbot_plugin_weather_alert")
         os.makedirs(self.data_dir, exist_ok=True)
         self.alert_ids_file = os.path.join(self.data_dir, "alert_ids.json")
         self.coords_file = os.path.join(self.data_dir, "coords.json")
