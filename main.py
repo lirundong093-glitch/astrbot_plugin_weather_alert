@@ -120,17 +120,17 @@ class WeatherAlertPlugin(Star):
             logger.error(f"[WeatherAlert] 保存坐标缓存失败: {e}")
 
     # ---------- 预警 ID 持久化 ----------
-    def _is_alert_id_seen(self, city: str, alert_id: str) -> bool:
+    def _is_alert_id_seen(self, alert_id: str) -> bool:
         if not os.path.exists(self.alert_ids_file):
             return False
         try:
             with open(self.alert_ids_file, "r", encoding="utf-8") as f:
-                return f"{city}:{alert_id}" in json.load(f)
+                return alert_id in json.load(f)
         except Exception as e:
             logger.warning(f"[WeatherAlert] 读取预警ID文件失败: {e}")
             return False
 
-    def _mark_alert_id_as_seen(self, city: str, alert_id: str):
+    def _mark_alert_id_as_seen(self, alert_id: str):
         ids = []
         if os.path.exists(self.alert_ids_file):
             try:
@@ -138,9 +138,8 @@ class WeatherAlertPlugin(Star):
                     ids = json.load(f)
             except Exception:
                 pass
-        key = f"{city}:{alert_id}"
-        if key not in ids:
-            ids.append(key)
+        if alert_id not in ids:
+            ids.append(alert_id)
         try:
             with open(self.alert_ids_file, "w", encoding="utf-8") as f:
                 json.dump(ids, f, ensure_ascii=False)
@@ -208,12 +207,12 @@ class WeatherAlertPlugin(Star):
                 pushed = 0
                 for alert in alerts:
                     alert_id = alert.get("id")
-                    if not alert_id or self._is_alert_id_seen(city, alert_id):
+                    if not alert_id or self._is_alert_id_seen(alert_id):
                         continue
 
                     desc = alert.get("description", "")
                     if self.skip_dismissed and ("预警信号解除" in desc or "预警解除" in desc):
-                        self._mark_alert_id_as_seen(city, alert_id)
+                        self._mark_alert_id_as_seen(alert_id)
                         logger.info(f"[WeatherAlert] {city} 跳过预警解除 (id={alert_id})")
                         continue
 
@@ -225,7 +224,7 @@ class WeatherAlertPlugin(Star):
                     img_path = self._generate_alert_image(alert)
                     success = await self._push_alert(text, img_path, origins)
                     if success:
-                        self._mark_alert_id_as_seen(city, alert_id)
+                        self._mark_alert_id_as_seen(alert_id)
                         pushed += 1
 
                 if pushed == 0:
