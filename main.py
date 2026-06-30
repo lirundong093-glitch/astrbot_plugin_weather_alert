@@ -191,17 +191,20 @@ class WeatherAlertPlugin(Star):
 
                 alert_data = await self._get_weather_alert(lat, lon)
                 if not alert_data:
+                    logger.info(f"[WeatherAlert] {city} API 返回空")
                     continue
 
                 meta = alert_data.get("metadata", {})
                 if meta.get("zeroResult") == "true":
-                    logger.info(f"[WeatherAlert] {city} zeroResult=True")
+                    logger.info(f"[WeatherAlert] {city} zeroResult=True，无预警")
                     continue
 
                 alerts = alert_data.get("alerts", [])
                 if not alerts:
+                    logger.info(f"[WeatherAlert] {city} 无预警数据")
                     continue
 
+                pushed = 0
                 for alert in alerts:
                     alert_id = alert.get("id")
                     if not alert_id or self._is_alert_id_seen(alert_id):
@@ -222,6 +225,10 @@ class WeatherAlertPlugin(Star):
                     success = await self._push_alert(text, img_path, origins)
                     if success:
                         self._mark_alert_id_as_seen(alert_id)
+                        pushed += 1
+
+                if pushed == 0:
+                    logger.info(f"[WeatherAlert] {city} 共 {len(alerts)} 条预警，过滤后无推送")
 
             except Exception as e:
                 logger.error(f"[WeatherAlert] {city} 处理异常: {e}", exc_info=True)
